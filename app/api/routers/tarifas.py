@@ -1,0 +1,110 @@
+import uuid
+from datetime import date, timedelta
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.api.deps import CurrentUser, get_db, require_roles
+from app.models.recursos import Tarifa
+from app.schemas.recursos import TarifaCreate, TarifaOut, TarifaVencer
+
+router = APIRouter(prefix="/tarifas", tags=["tarifas"])
+
+
+def _obtener_tarifa(db: Session, tarifa_id: uuid.UUID) -> Tarifa:
+    tarifa = db.get(Tarifa, tarifa_id)
+    if not tarifa:
+        raise HTTPException(status_code=404, detail="Tarifa no encontrada")
+    return tarifa
+
+
+@router.post("", response_model=TarifaOut, status_code=status.HTTP_201_CREATED)
+def crear_tarifa(
+    payload: TarifaCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+):
+    """Crea una nueva tarifa vigente para un cliente+servicio (+tipo de vehículo).
+
+    Si ya existe una tarifa vigente para la misma combinación, se cierra
+    automáticamente (vigente_hasta = un día antes de la nueva vigente_desde)
+    -- así nunca hay dos tarifas vigentes al mismo tiempo, y el historial de
+    tarifas anteriores se conserva intacto: las liquidaciones ya cerradas
+    guardan su propio valor_calculado y no dependen de este objeto después.
+    """
+    vigente_desde = payload.vigente_desde or date.today()
+
+    filtros = [
+        Tarifa.cliente_id == payload.cliente_id,
+        Tarifa.servicio_id == payload.servicio_id,
+        Tarifa.criterio == payload.criterio,
+        Tarifa.vigente_hasta.is_(None),
+    ]
+    if payload.criterio == "vehiculo":
+        filtros.append(Tarifa.tipo_vehiculo_id == payload.tipo_vehiculo_id)
+
+    tarifa_anterior = db.scalars(select(Tarifa).where(*filtros)).first()
+    if tarifa_anterior:
+        tarifa_anterior.vigente_hasta = vigente_desde - timedelta(days=1)
+
+    nueva = Tarifa(
+        empresa_id=current_user.empresa_id,
+        cliente_id=payload.cliente_id,
+        servicio_id=payload.servicio_id,
+        criterio=payload.criterio,
+        valor=payload.valor,
+        tipo_vehiculo_id=payload.tipo_vehiculo_id,
+        vigente_desde=vigente_desde,
+        vigente_hasta=None,
+    )
+    db.add(nueva)
+    db.commit()
+    db.refresh(nueva)
+    return nueva
+
+
+@router.get("", response_model=list[TarifaOut])
+def listar_tarifas(
+    cliente_id: Optional[uuid.UUID] = None,
+    servicio_id: Optional[uuid.UUID] = None,
+    solo_vigentes: bool = True,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+):
+    query = select(Tarifa)
+    if cliente_id:
+        query = query.where(Tarifa.cliente_id == cliente_id)
+    if servicio_id:
+        query = query.where(Tarifa.servicio_id == servicio_id)
+    if solo_vigentes:
+        query = query.where(Tarifa.vigente_hasta.is_(None))
+    return db.scalars(query.order_by(Tarifa.vigente_desde.desc())).all()
+
+
+@router.get("/{tarifa_id}", response_model=TarifaOut)
+def consultar_tarifa(
+    tarifa_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+):
+    return _obtener_tarifa(db, tarifa_id)
+
+
+@router.patch("/{tarifa_id}/vencer", response_model=TarifaOut)
+def vencer_tarifa(
+    tarifa_id: uuid.UUID,
+    payload: TarifaVencer,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+):
+    """Cierra la vigencia de una tarifa sin crear una nueva -- útil cuando
+    se descontinúa un servicio para un cliente sin reemplazo inmediato."""
+    tarifa = _obtener_tarifa(db, tarifa_id)
+    if tarifa.vigente_hasta is not None:
+        raise HTTPException(status_code=400, detail="Esta tarifa ya tiene fecha de vencimiento")
+    tarifa.vigente_hasta = payload.vigente_hasta or date.today()
+    db.commit()
+    db.refresh(tarifa)
+    return tarifa
