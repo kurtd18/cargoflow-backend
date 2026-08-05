@@ -1,4 +1,4 @@
-from pathlib import Path
+vfrom pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,13 +15,18 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 480
 
-    # development | production -- controla si /docs queda expuesto y si se
-    # valida que JWT_SECRET ya no sea el de ejemplo.
+    # development | production -- controla si se valida que JWT_SECRET ya
+    # no sea el de ejemplo.
     environment: str = "development"
 
     # "*" en desarrollo. En producción, dominios reales separados por coma,
     # ej: "https://app.cargoflow.com,https://admin.cargoflow.com"
     allowed_origins: str = "*"
+
+    # Independiente de environment a propósito: permite exponer /docs en un
+    # despliegue de portafolio/demo sin necesidad de bajar la validación de
+    # JWT_SECRET ni ninguna otra protección de producción.
+    expose_docs: bool = False
 
     model_config = SettingsConfigDict(env_file=str(PROJECT_ROOT / ".env"), extra="ignore")
 

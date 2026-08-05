@@ -8,9 +8,9 @@ app = FastAPI(
     title="CargoFlow API",
     description="Backend de CargoFlow — plataforma de gestión de operaciones logísticas.",
     version="0.1.0",
-    docs_url=None if settings.es_produccion else "/docs",
-    redoc_url=None if settings.es_produccion else "/redoc",
-    openapi_url=None if settings.es_produccion else "/openapi.json",
+    docs_url="/docs" if settings.expose_docs else None,
+    redoc_url="/redoc" if settings.expose_docs else None,
+    openapi_url="/openapi.json" if settings.expose_docs else None,
 )
 
 app.add_middleware(
