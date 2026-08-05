@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/kurtd18/cargoflow-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/kurtd18/cargoflow-backend/actions/workflows/ci.yml)
 
-API REST para gestión de operaciones logísticas en centros de distribución (cargue, descargue, picking): control de cuadrillas, tarifas, evidencias obligatorias, inspección de calidad por muestreo (AQL), facturación y liquidación de operaciones — con aislamiento completo entre empresas (multi-tenant) garantizado a nivel de motor de base de datos.
+API REST para gestión de operaciones logísticas en centros de distribución (cargue, descargue, picking): control de cuadrillas, tarifas, evidencias obligatorias, inspección de calidad por muestreo (AQL), facturación, liquidación de operaciones y portal de autoservicio para clientes — con aislamiento completo entre empresas (multi-tenant) garantizado a nivel de motor de base de datos.
 
 Construida con **FastAPI + PostgreSQL**, usando Row-Level Security nativo de Postgres, no solo lógica de aplicación.
 
@@ -28,7 +28,7 @@ Para probar: entra a `/docs` → botón **Authorize** → `POST /auth/login` con
 - **PostgreSQL 16** — con Row-Level Security nativo para aislamiento multiempresa
 - **SQLAlchemy 2.0** (estilo `Mapped`/`mapped_column`) + **Alembic** para migraciones
 - **JWT** (python-jose) para autenticación
-- **pytest** — 47 pruebas de integración contra Postgres real (no SQLite)
+- **pytest** — 52 pruebas de integración contra Postgres real (no SQLite)
 - **Docker Compose** — API + base de datos con un solo comando
 - **GitHub Actions** — CI corriendo la suite completa en cada push
 - **Railway** — despliegue en producción
@@ -37,7 +37,9 @@ Para probar: entra a `/docs` → botón **Authorize** → `POST /auth/login` con
 
 Cada tabla de negocio tiene una política de **Row-Level Security** en PostgreSQL que exige `empresa_id = current_setting('app.current_tenant')`. Antes de cualquier consulta, la sesión de base de datos fija ese valor a partir del `empresa_id` codificado en el JWT del usuario autenticado.
 
-El aislamiento entre empresas lo garantiza **PostgreSQL**, no una condición `WHERE` que alguien podría olvidar agregar en un endpoint nuevo — un error de programación no puede filtrar datos de una empresa a otra.
+El aislamiento entre empresas lo garantiza **PostgreSQL**, no una condición WHERE que alguien podría olvidar agregar en un endpoint nuevo — un error de programación no puede filtrar datos de una empresa a otra.
+
+Sobre el **Portal del Cliente**: el mismo JWT puede llevar, además del `empresa_id`, un `cliente_id` opcional cuando el login pertenece a `rol='cliente'`. Los endpoints del portal (`/portal/*`) filtran explícitamente por ese `cliente_id` encima del aislamiento por empresa — así un cliente nunca ve datos de otro cliente de la misma empresa, aunque ambos compartan el mismo tenant de RLS.
 
 ## Módulos
 
@@ -52,11 +54,12 @@ El aislamiento entre empresas lo garantiza **PostgreSQL**, no una condición `WH
 | **Facturación** | Cartera pendiente de cobro y marcado de pagos, a partir de los cierres de operación |
 | **Reportes** | Dashboard consolidado: operaciones por estado y tiempos, calidad, financiero |
 | **Clientes / Proveedores** | Alta y consulta — el mínimo necesario para dar de alta el resto de las entidades |
+| **Portal del Cliente** | Login separado (rol='cliente') para que un cliente vea solo sus propias operaciones y pagos |
 
 ## Endpoints principales
 
 <details>
-<summary>Ver tabla completa (33 endpoints)</summary>
+<summary>Ver tabla completa (39 endpoints)</summary>
 
 | Método | Ruta |
 |---|---|
@@ -71,7 +74,9 @@ El aislamiento entre empresas lo garantiza **PostgreSQL**, no una condición `WH
 | GET / PATCH | /facturacion/pendientes, /facturacion/resumen, /facturacion/pagos/{id}/marcar-pagado |
 | GET | /reportes/dashboard |
 | POST / GET | /clientes, /clientes/{id} |
+| POST | /clientes/{id}/usuarios (crea login del Portal del Cliente) |
 | POST / GET | /proveedores, /proveedores/{id} |
+| GET | /portal/mis-operaciones, /portal/mis-operaciones/{id}, /portal/mis-pagos |
 | GET | /health |
 
 </details>
@@ -85,9 +90,10 @@ Documentación interactiva completa (con esquemas de cada request/response) en `
 - La liquidación **siempre** se calcula con `cantidad_real`, nunca con `cantidad_estimada`.
 - Cerrar con `forma_pago: credito` exige que el cliente esté registrado con esa condición → `400` si no.
 - Las tarifas se **versionan**, nunca se editan en sitio: crear una nueva para el mismo cliente+servicio cierra automáticamente la anterior.
-- AQL usa las tablas reales de la norma (código de letra por lote, Ac/Re verificados) para decidir aceptado/rechazado, y actualiza automáticamente la severidad del proveedor según las reglas de cambio oficiales.
+- AQL usa las tablas reales de la norma (código de letra por lote, Ac/Re verificados para inspección normal) para decidir aceptado/rechazado, y actualiza automáticamente la severidad del proveedor (normal/reforzado/reducido) según las reglas de cambio oficiales — incluyendo el umbral de 10 lotes consecutivos aceptados para pasar a reducido, verificado contra 7 CFR 42.108.
+- Un usuario del Portal del Cliente **nunca puede ver operaciones o pagos de otro cliente**, ni usar los endpoints internos de staff, aunque tenga un token válido.
 
-Todas estas reglas están cubiertas por la suite de pytest (47 pruebas) y se validan automáticamente en cada push vía CI.
+Todas estas reglas están cubiertas por la suite de pytest (52 pruebas) y se validan automáticamente en cada push vía CI.
 
 ## Cómo correrlo
 
@@ -143,23 +149,24 @@ Corre contra una base de datos Postgres real y separada (el nombre de tu base + 
 ```
 app/
   api/
-    deps.py            (autenticacion, RLS por tenant, control de roles)
+    deps.py            (autenticacion, RLS por tenant, control de roles, require_cliente)
     routers/            (auth, operaciones, evidencias, incidencias, tarifas,
-                          aql, facturacion, reportes, clientes, proveedores)
+                          aql, facturacion, reportes, clientes, proveedores,
+                          portal_cliente)
   core/                  (settings, database con RLS, security JWT)
   models/                (plataforma, recursos, operaciones, calidad)
   schemas/               (Pydantic: request/response por modulo)
   services/aql.py        (tablas ANSI Z1.4 y logica de muestreo, sin DB)
   storage/                (abstraccion de almacenamiento de archivos subidos)
 alembic/                  (migraciones, incluye las politicas RLS)
-tests/                    (pytest, contra Postgres real, 47 pruebas)
+tests/                    (pytest, contra Postgres real, 52 pruebas)
 scripts/                  (seed_demo.py, seed_demo_produccion.py)
 .github/workflows/         (CI)
 ```
 
 ## Roadmap
 
-- Portal del cliente (que el cliente vea sus propias operaciones/pagos)
-- Tablas Ac/Re verificadas para inspección reforzada y reducida (hoy AQL reutiliza la tabla normal como aproximación en esos dos estados)
+- Tablas Ac/Re verificadas para inspección reforzada y reducida (hoy AQL reutiliza la tabla normal como aproximación en esos dos estados -- las únicas fuentes encontradas para esas tablas eran PDFs escaneados poco confiables para transcribir)
 - Migración de almacenamiento local (uploads/) a object storage (S3 o similar) para despliegue multi-instancia
 - Facturación electrónica real (integración DIAN)
+- Notificaciones al cliente cuando su operación cambia de estado
