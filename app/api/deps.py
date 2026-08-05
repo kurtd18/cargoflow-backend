@@ -9,10 +9,11 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
 class CurrentUser:
-    def __init__(self, usuario_id: str, empresa_id: str, rol: str):
+    def __init__(self, usuario_id: str, empresa_id: str, rol: str, cliente_id: str | None = None):
         self.usuario_id = usuario_id
         self.empresa_id = empresa_id
         self.rol = rol
+        self.cliente_id = cliente_id
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> CurrentUser:
@@ -20,7 +21,12 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> CurrentUser:
         payload = decode_access_token(token)
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido o expirado")
-    return CurrentUser(usuario_id=payload["sub"], empresa_id=payload["empresa_id"], rol=payload["rol"])
+    return CurrentUser(
+        usuario_id=payload["sub"],
+        empresa_id=payload["empresa_id"],
+        rol=payload["rol"],
+        cliente_id=payload.get("cliente_id"),
+    )
 
 
 def get_db(current_user: CurrentUser = Depends(get_current_user)) -> Session:
@@ -41,3 +47,17 @@ def require_roles(*roles_permitidos: str):
         return current_user
 
     return checker
+
+
+def require_cliente(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Restringe un endpoint a usuarios del Portal de Cliente (rol='cliente'
+    con cliente_id asignado). Los endpoints de staff (require_roles) ya
+    rechazan 'cliente' automáticamente porque nunca aparece en su lista de
+    roles permitidos -- esta dependencia es el equivalente inverso.
+    """
+    if current_user.rol != "cliente" or not current_user.cliente_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Este endpoint es solo para usuarios del portal de cliente",
+        )
+    return current_user

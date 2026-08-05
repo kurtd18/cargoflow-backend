@@ -24,10 +24,14 @@ class Usuario(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     empresa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("empresas.id"), nullable=False)
+    # cliente_id: solo se usa cuando rol='cliente' (portal de cliente) -- liga
+    # este login a UN cliente específico de la empresa, para que solo vea sus
+    # propias operaciones/pagos. NULL para usuarios internos de la empresa.
+    cliente_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("clientes.id"), nullable=True)
     nombre: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
-    # rol: admin_plataforma | gerente | supervisor | auxiliar | auditor | facturacion
+    # rol: admin_plataforma | gerente | supervisor | auxiliar | auditor | facturacion | cliente
     rol: Mapped[str] = mapped_column(String, nullable=False)
     tipo_acceso: Mapped[str] = mapped_column(String, default="web")  # web | movil
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -54,8 +58,6 @@ class Proveedor(Base):
     empresa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("empresas.id"), nullable=False)
     nombre: Mapped[str] = mapped_column(String, nullable=False)
     nit: Mapped[str] = mapped_column(String, nullable=True)
-    # nivel_riesgo: confiable | riesgoso -- se recalcula desde el módulo AQL
     nivel_riesgo: Mapped[str] = mapped_column(String, default="confiable")
-    # nivel_inspeccion_actual: normal | reforzado | reducido
     nivel_inspeccion_actual: Mapped[str] = mapped_column(String, default="normal")
     actualizado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

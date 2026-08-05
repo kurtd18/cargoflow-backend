@@ -30,3 +30,21 @@ class ClienteOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class UsuarioClienteCreate(BaseModel):
+    """Credencial de acceso al Portal del Cliente."""
+    nombre: str
+    email: str
+    password: str
+
+
+class UsuarioClienteOut(BaseModel):
+    id: uuid.UUID
+    nombre: str
+    email: str
+    cliente_id: uuid.UUID
+    activo: bool
+
+    class Config:
+        from_attributes = True

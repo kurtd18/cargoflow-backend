@@ -233,3 +233,20 @@ def auth_headers(client, empresa_demo):
     assert resp.status_code == 200, resp.text
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def portal_headers(client, auth_headers, empresa_demo):
+    """Headers de un usuario del Portal de Cliente, ligado a cliente_id
+    (el 'Cliente Contado' de empresa_demo)."""
+    resp = client.post(
+        f"/clientes/{empresa_demo['cliente_id']}/usuarios",
+        json={"nombre": "Usuario Portal", "email": "portal@test.demo", "password": "portal123"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = client.post("/auth/login", json={"email": "portal@test.demo", "password": "portal123"})
+    assert resp.status_code == 200, resp.text
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}

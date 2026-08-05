@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, get_db, require_roles
-from app.models.plataforma import Cliente
-from app.schemas.clientes import ClienteCreate, ClienteOut
+from app.core.security import hash_password
+from app.models.plataforma import Cliente, Usuario
+from app.schemas.clientes import ClienteCreate, ClienteOut, UsuarioClienteCreate, UsuarioClienteOut
 
 router = APIRouter(prefix="/clientes", tags=["clientes"])
 
@@ -49,3 +50,33 @@ def consultar_cliente(
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return cliente
+
+
+@router.post("/{cliente_id}/usuarios", response_model=UsuarioClienteOut, status_code=status.HTTP_201_CREATED)
+def crear_usuario_portal(
+    cliente_id: uuid.UUID,
+    payload: UsuarioClienteCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+):
+    """Crea una credencial de acceso al Portal del Cliente. El login queda
+    ligado a este cliente_id (rol='cliente') y solo puede ver sus propias
+    operaciones y pagos -- ver app/api/routers/portal_cliente.py."""
+    cliente = db.get(Cliente, cliente_id)
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+
+    usuario = Usuario(
+        empresa_id=current_user.empresa_id,
+        cliente_id=cliente_id,
+        nombre=payload.nombre,
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+        rol="cliente",
+        tipo_acceso="web",
+        activo=True,
+    )
+    db.add(usuario)
+    db.commit()
+    db.refresh(usuario)
+    return usuario

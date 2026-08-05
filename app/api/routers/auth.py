@@ -18,12 +18,21 @@ def _autenticar(email: str, password: str, db: Session) -> Usuario:
     return usuario
 
 
+def _token_para(usuario: Usuario) -> TokenResponse:
+    token = create_access_token(
+        usuario_id=str(usuario.id),
+        empresa_id=str(usuario.empresa_id),
+        rol=usuario.rol,
+        cliente_id=str(usuario.cliente_id) if usuario.cliente_id else None,
+    )
+    return TokenResponse(access_token=token)
+
+
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db_admin)):
     """Login en JSON — el que usa la app móvil/web real."""
     usuario = _autenticar(payload.email, payload.password, db)
-    token = create_access_token(usuario_id=str(usuario.id), empresa_id=str(usuario.empresa_id), rol=usuario.rol)
-    return TokenResponse(access_token=token)
+    return _token_para(usuario)
 
 
 @router.post("/token", response_model=TokenResponse)
@@ -33,5 +42,4 @@ def login_form(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = D
     formato que espera Swagger; internamente valida igual contra la tabla usuarios.
     """
     usuario = _autenticar(form_data.username, form_data.password, db)
-    token = create_access_token(usuario_id=str(usuario.id), empresa_id=str(usuario.empresa_id), rol=usuario.rol)
-    return TokenResponse(access_token=token)
+    return _token_para(usuario)
