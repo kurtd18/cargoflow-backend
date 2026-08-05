@@ -14,6 +14,7 @@ en el momento de importarse.
 
 import os
 import sys
+import uuid
 from datetime import date
 from pathlib import Path
 
@@ -46,13 +47,13 @@ from sqlalchemy import text  # noqa: E402
 from app.core.database import SessionLocal, engine  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models.plataforma import Cliente, Empresa, Usuario  # noqa: E402
+from app.models.plataforma import Cliente, Empresa, Proveedor, Usuario  # noqa: E402
 from app.models.recursos import Cuadrilla, Servicio, Tarifa  # noqa: E402
 
 PASSWORD_DEMO = "cargoflow123"
 
 TABLAS_EN_ORDEN_DE_LIMPIEZA = (
-    "evidencias", "incidencias", "pagos", "liquidaciones", "operaciones",
+    "inspecciones_aql", "evidencias", "incidencias", "pagos", "liquidaciones", "operaciones",
     "tarifas", "servicios", "cuadrillas", "vehiculos", "tipos_vehiculo",
     "proveedores", "clientes", "usuarios", "empresas",
 )
@@ -198,6 +199,21 @@ def empresa_demo(db_admin):
         "tarifa_id": str(tarifa.id),
         "tarifa_credito_id": str(tarifa_credito.id),
     }
+
+
+@pytest.fixture
+def proveedor_demo(db_admin, empresa_demo):
+    """Proveedor de prueba, listo para registrar inspecciones AQL."""
+    db = db_admin
+    proveedor = Proveedor(
+        empresa_id=uuid.UUID(empresa_demo["empresa_id"]),
+        nombre="Proveedor Test",
+        nit="900000002-3",
+    )
+    db.add(proveedor)
+    db.commit()
+    db.refresh(proveedor)
+    return str(proveedor.id)
 
 
 @pytest.fixture
