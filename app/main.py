@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import aql, auth, evidencias, incidencias, operaciones, tarifas
+from app.api.routers import aql, auth, evidencias, facturacion, incidencias, operaciones, tarifas
 from app.core.config import settings
 
 app = FastAPI(
@@ -26,6 +26,7 @@ app.include_router(evidencias.router)
 app.include_router(incidencias.router)
 app.include_router(tarifas.router)
 app.include_router(aql.router)
+app.include_router(facturacion.router)
 
 
 @app.get("/health")
