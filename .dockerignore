@@ -1,0 +1,12 @@
+.venv/
+.git/
+__pycache__/
+*.pyc
+uploads/
+.env
+.pytest_cache/
+tests/
+scripts/seed_data.json
+.gitignore
+.dockerignore
+README.md

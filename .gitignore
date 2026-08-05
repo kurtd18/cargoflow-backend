@@ -1,0 +1,23 @@
+# Entorno virtual
+.venv/
+venv/
+
+# Variables de entorno -- contienen secretos, nunca se versionan
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Archivos subidos por usuarios (evidencias/incidencias)
+uploads/
+
+# Datos de prueba generados por scripts/seed_demo.py
+scripts/seed_data.json
+
+# IDEs
+.vscode/
+.idea/
+
+# pytest
+.pytest_cache/
