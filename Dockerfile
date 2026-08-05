@@ -13,7 +13,7 @@ COPY . .
 
 EXPOSE 8000
 
-# Corre las migraciones automáticamente al arrancar el contenedor,
-# antes de levantar el servidor -- así nunca queda una versión de la API
-# corriendo contra un esquema desactualizado.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# ${PORT:-8000}: usa el puerto que la plataforma de hosting asigne (Railway,
+# Render, etc. lo inyectan como variable PORT); si no existe, usa 8000
+# (caso local con docker-compose).
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
