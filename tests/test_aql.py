@@ -86,8 +86,10 @@ def test_dos_rechazos_en_cinco_activan_severidad_reforzada(client, auth_headers,
     assert resp.json()["severidad"] == "reforzado"
 
 
-def test_cinco_aceptados_activan_severidad_reducida(client, auth_headers, proveedor_demo):
-    for _ in range(5):
+def test_diez_aceptados_activan_severidad_reducida(client, auth_headers, proveedor_demo):
+    """Corregido: la norma exige 10 lotes consecutivos aceptados para pasar
+    a reducido (verificado contra 7 CFR 42.108), no 5."""
+    for _ in range(10):
         client.post(
             "/aql/inspecciones",
             json={

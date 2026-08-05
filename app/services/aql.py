@@ -12,7 +12,13 @@ para inspección NORMAL. Los niveles "reforzado" y "reducido" de la norma
 usan sus propias tablas (II-B y II-C) con Ac/Re distintos -- por ahora,
 cuando el proveedor está en reforzado/reducido, este módulo reutiliza los
 mismos Ac/Re de la tabla normal como aproximación (TODO: incorporar II-B
-y II-C verificadas). Las REGLAS DE CAMBIO de severidad sí están completas.
+y II-C verificadas -- no se agregaron todavía porque las únicas fuentes
+disponibles eran PDFs escaneados con columnas ilegibles, y prefiero dejar
+el TODO explícito a transcribir números sin poder confirmarlos).
+
+Las REGLAS DE CAMBIO de severidad sí están completas y verificadas contra
+dos fuentes independientes (incluyendo 7 CFR 42.108, que reproduce la
+misma lógica de switching rules de la norma).
 """
 
 from dataclasses import dataclass
@@ -114,15 +120,17 @@ def evaluar_resultado(defectos_encontrados: int, limite_aceptacion: int, limite_
 def recalcular_severidad(resultados_recientes: list[str], severidad_actual: str) -> str:
     """Reglas de cambio (switching rules) de la norma, aplicadas sobre el
     historial reciente de resultados ('aceptado'/'rechazado'), del más
-    reciente al más antiguo.
+    reciente al más antiguo. Verificadas contra 7 CFR 42.108, que reproduce
+    la misma lógica de switching rules de ANSI/ASQ Z1.4.
 
     - normal -> reforzado: si 2 de los últimos 5 lotes fueron rechazados.
     - reforzado -> normal: si los últimos 5 lotes bajo reforzado fueron aceptados.
-    - normal -> reducido: si los últimos 5 lotes fueron aceptados (la norma también
+    - normal -> reducido: si los últimos 10 lotes fueron aceptados (la norma también
       exige estabilidad de producción, que este sistema no modela todavía).
     - reducido -> normal: si el lote más reciente fue rechazado.
     """
     ultimos_5 = resultados_recientes[:5]
+    ultimos_10 = resultados_recientes[:10]
     rechazados_en_5 = ultimos_5.count("rechazado")
 
     if severidad_actual == "reducido":
@@ -135,7 +143,7 @@ def recalcular_severidad(resultados_recientes: list[str], severidad_actual: str)
             return "normal"
         return "reforzado"
 
-    if len(ultimos_5) == 5 and rechazados_en_5 == 0:
+    if len(ultimos_10) == 10 and ultimos_10.count("rechazado") == 0:
         return "reducido"
     if rechazados_en_5 >= 2:
         return "reforzado"
