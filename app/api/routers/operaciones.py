@@ -26,6 +26,16 @@ def _obtener_operacion(db: Session, operacion_id: uuid.UUID) -> Operacion:
     return operacion
 
 
+def _calcular_valor(tarifa: Tarifa, cantidad_real: float) -> float:
+    """criterio='vehiculo': tarifa plana por todo el vehículo, no se
+    multiplica por la cantidad de cajas/unidades manejadas -- esa cantidad
+    se sigue registrando (para AQL y productividad), simplemente no entra
+    en el cálculo del cobro cuando el criterio es por vehículo."""
+    if tarifa.criterio == "vehiculo":
+        return float(tarifa.valor)
+    return float(cantidad_real) * float(tarifa.valor)
+
+
 @router.post("", response_model=OperacionOut, status_code=status.HTTP_201_CREATED)
 def crear_operacion(
     payload: OperacionCreate,
@@ -65,11 +75,6 @@ def asignar_cuadrilla_y_tarifa(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles("supervisor")),
 ):
-    """UX Spec 4.1.2 — Asigna la cuadrilla siempre. La tarifa es opcional aquí:
-    si se envía, la operación queda en modo clásico de una sola tarifa
-    (Víveres/Electro); si no, el cobro se arma después con líneas
-    (POST /{id}/lineas), para operaciones tipo Fruver que combinan varios
-    conceptos."""
     operacion = _obtener_operacion(db, operacion_id)
 
     operacion.cuadrilla_id = payload.cuadrilla_id
@@ -90,9 +95,6 @@ def agregar_linea_cobro(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles("supervisor")),
 ):
-    """Agrega un concepto de cobro a la operación (tarifa + cantidad).
-    Una operación puede tener varias líneas a la vez -- ej. Fruver:
-    descargue por tonelada Y trasvaseo por tonelada en la misma operación."""
     operacion = _obtener_operacion(db, operacion_id)
     if operacion.estado not in ("asignada", "en_curso"):
         raise HTTPException(
@@ -195,18 +197,6 @@ def cerrar_operacion(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles("supervisor")),
 ):
-    """UX Spec 4.1.5 — Cerrar operación.
-
-    Dos modos:
-    - Con líneas de cobro (Fruver): liquida cada línea por separado con su
-      propia tarifa y cantidad_real, y suma el total para el pago.
-    - Sin líneas (modo clásico, ej. Víveres/Electro): usa la tarifa única
-      de la operación y la cantidad_real del body, como siempre.
-
-    En ambos casos: la liquidación SIEMPRE usa cantidad_real, nunca la
-    estimada. forma_pago='credito' solo es válida si el cliente está
-    registrado como tal.
-    """
     operacion = _obtener_operacion(db, operacion_id)
     if operacion.estado != "en_curso":
         raise HTTPException(
@@ -233,7 +223,7 @@ def cerrar_operacion(
                     detail=f"Falta registrar cantidad_real en la línea {linea.id} antes de cerrar",
                 )
             tarifa = db.get(Tarifa, linea.tarifa_id)
-            valor_calculado = float(linea.cantidad_real) * float(tarifa.valor)
+            valor_calculado = _calcular_valor(tarifa, linea.cantidad_real)
             valor_total += valor_calculado
             db.add(Liquidacion(
                 operacion_id=operacion.id,
@@ -250,7 +240,7 @@ def cerrar_operacion(
                 detail="cantidad_real es obligatoria para cerrar una operación sin líneas de cobro",
             )
         tarifa = db.get(Tarifa, operacion.tarifa_id)
-        valor_total = float(payload.cantidad_real) * float(tarifa.valor)
+        valor_total = _calcular_valor(tarifa, payload.cantidad_real)
         operacion.cantidad_real = payload.cantidad_real
         db.add(Liquidacion(
             operacion_id=operacion.id,
