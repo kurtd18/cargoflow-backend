@@ -10,10 +10,10 @@ CRITERIOS_VALIDOS = {"cajas", "unidades", "vehiculo"}
 class TarifaCreate(BaseModel):
     cliente_id: uuid.UUID
     servicio_id: uuid.UUID
-    criterio: str  # cajas | unidades | vehiculo
+    criterio: str
     valor: float
     tipo_vehiculo_id: Optional[uuid.UUID] = None
-    vigente_desde: Optional[date] = None  # si no se envía, se usa hoy
+    vigente_desde: Optional[date] = None
 
     @model_validator(mode="after")
     def _validar_criterio_y_tipo_vehiculo(self):
@@ -25,7 +25,7 @@ class TarifaCreate(BaseModel):
 
 
 class TarifaVencer(BaseModel):
-    vigente_hasta: Optional[date] = None  # si no se envía, se usa hoy
+    vigente_hasta: Optional[date] = None
 
 
 class TarifaOut(BaseModel):
@@ -38,6 +38,25 @@ class TarifaOut(BaseModel):
     tipo_vehiculo_id: Optional[uuid.UUID]
     vigente_desde: date
     vigente_hasta: Optional[date]
+
+    class Config:
+        from_attributes = True
+
+
+class ServicioOut(BaseModel):
+    id: uuid.UUID
+    empresa_id: uuid.UUID
+    nombre: str
+
+    class Config:
+        from_attributes = True
+
+
+class CuadrillaOut(BaseModel):
+    id: uuid.UUID
+    empresa_id: uuid.UUID
+    nombre: str
+    estado: str
 
     class Config:
         from_attributes = True
