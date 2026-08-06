@@ -32,9 +32,6 @@ if not _base_url:
 _base_url_obj = make_url(_base_url)
 _test_url_obj = _base_url_obj.set(database=f"{_base_url_obj.database}_test")
 
-# OJO: str(_test_url_obj) OCULTA la contraseña con '***' a propósito (protección
-# de SQLAlchemy contra fugas de credenciales en logs). Para el valor real hay
-# que pedirlo explícitamente con hide_password=False.
 os.environ["DATABASE_URL"] = _test_url_obj.render_as_string(hide_password=False)
 
 import subprocess  # noqa: E402
@@ -53,17 +50,13 @@ from app.models.recursos import Cuadrilla, Servicio, Tarifa  # noqa: E402
 PASSWORD_DEMO = "cargoflow123"
 
 TABLAS_EN_ORDEN_DE_LIMPIEZA = (
-    "inspecciones_aql", "evidencias", "incidencias", "pagos", "liquidaciones", "operaciones",
+    "lineas_cobro", "inspecciones_aql", "evidencias", "incidencias", "pagos", "liquidaciones", "operaciones",
     "tarifas", "servicios", "cuadrillas", "vehiculos", "tipos_vehiculo",
     "proveedores", "clientes", "usuarios", "empresas",
 )
 
 
 def _asegurar_base_de_datos_de_test():
-    """Crea la base de datos de test (ej. cargoflow_test) si todavía no existe.
-    Se conecta a la base 'postgres' de mantenimiento — no se puede crear una
-    base de datos estando conectado a ella misma.
-    """
     conn = psycopg.connect(
         host=_test_url_obj.host,
         port=_test_url_obj.port,
@@ -84,9 +77,6 @@ def _asegurar_base_de_datos_de_test():
 
 @pytest.fixture(scope="session", autouse=True)
 def _base_de_datos_de_test_lista():
-    """Se ejecuta una sola vez por corrida de pytest: crea la base de test
-    si falta y la deja al día con `alembic upgrade head`.
-    """
     _asegurar_base_de_datos_de_test()
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
@@ -98,24 +88,18 @@ def _base_de_datos_de_test_lista():
 
 @pytest.fixture(autouse=True)
 def _tablas_limpias(_base_de_datos_de_test_lista):
-    """Deja todas las tablas vacías antes de cada test, para que ningún test
-    dependa de datos que dejó otro."""
     with engine.begin() as conn:
         conn.execute(text(f"TRUNCATE TABLE {', '.join(TABLAS_EN_ORDEN_DE_LIMPIEZA)} RESTART IDENTITY CASCADE"))
 
 
 @pytest.fixture(autouse=True)
 def _uploads_en_carpeta_temporal(tmp_path, monkeypatch):
-    """Las evidencias subidas durante los tests se guardan en una carpeta
-    temporal, no en uploads/evidencias/ del proyecto real."""
     import app.storage.evidencias as storage_module
     monkeypatch.setattr(storage_module, "BASE_UPLOAD_DIR", tmp_path / "evidencias")
 
 
 @pytest.fixture
 def db_admin():
-    """Sesión sin tenant fijado, para preparar datos de prueba directamente
-    (igual que scripts/seed_demo.py)."""
     db = SessionLocal()
     try:
         yield db
@@ -129,11 +113,6 @@ def _fijar_tenant(db, empresa_id):
 
 @pytest.fixture
 def empresa_demo(db_admin):
-    """Crea una empresa con usuario supervisor, dos clientes (uno a contado,
-    uno a crédito), servicio, cuadrilla y dos tarifas vigentes — el mínimo
-    para probar el flujo completo de una operación de punta a punta,
-    siguiendo el mismo patrón que scripts/seed_demo.py.
-    """
     db = db_admin
 
     empresa = Empresa(nombre="Empresa Test", plan="trial", estado="activa")
@@ -203,7 +182,6 @@ def empresa_demo(db_admin):
 
 @pytest.fixture
 def proveedor_demo(db_admin, empresa_demo):
-    """Proveedor de prueba, listo para registrar inspecciones AQL."""
     db = db_admin
     proveedor = Proveedor(
         empresa_id=uuid.UUID(empresa_demo["empresa_id"]),
@@ -224,12 +202,34 @@ def client():
 
 @pytest.fixture
 def auth_headers(client, empresa_demo):
-    """Hace login real contra /auth/login y devuelve el header Authorization
-    ya listo para usar en las demás peticiones."""
     resp = client.post(
         "/auth/login",
         json={"email": empresa_demo["email"], "password": empresa_demo["password"]},
     )
+    assert resp.status_code == 200, resp.text
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def gerente_headers(client, db_admin, empresa_demo):
+    """Headers de un usuario con rol='gerente' en la misma empresa -- para
+    endpoints que ya no permiten supervisor (ej. GET /reportes/dashboard)."""
+    db = db_admin
+    _fijar_tenant(db, uuid.UUID(empresa_demo["empresa_id"]))
+    usuario = Usuario(
+        empresa_id=uuid.UUID(empresa_demo["empresa_id"]),
+        nombre="Gerente Test",
+        email="gerente@test.demo",
+        password_hash=hash_password(PASSWORD_DEMO),
+        rol="gerente",
+        tipo_acceso="web",
+        activo=True,
+    )
+    db.add(usuario)
+    db.commit()
+
+    resp = client.post("/auth/login", json={"email": "gerente@test.demo", "password": PASSWORD_DEMO})
     assert resp.status_code == 200, resp.text
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}

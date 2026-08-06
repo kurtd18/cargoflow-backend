@@ -40,7 +40,7 @@ async def subir_evidencia(
     tipo: str = Form(...),
     archivo: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor")),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "operario")),
 ):
     """Sube una evidencia (foto/documento) asociada a una operación."""
     _obtener_operacion(db, operacion_id)
@@ -67,7 +67,7 @@ async def subir_evidencia(
 def listar_evidencias(
     operacion_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "operario")),
 ):
     _obtener_operacion(db, operacion_id)
     return db.scalars(
@@ -82,10 +82,6 @@ def descargar_evidencia(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "auditor", "facturacion")),
 ):
-    """Sirve el archivo real de una evidencia (Sección 5.10 del PRD:
-    'disponible para consulta y auditoría posterior'). Antes solo se
-    guardaba la ruta en la base de datos; no había forma de recuperar
-    el archivo en sí."""
     _obtener_operacion(db, operacion_id)
     evidencia = _obtener_evidencia_de_operacion(db, operacion_id, evidencia_id)
 
@@ -99,7 +95,7 @@ def descargar_evidencia(
 def estado_evidencias(
     operacion_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "operario")),
 ):
     _obtener_operacion(db, operacion_id)
     presentes = {

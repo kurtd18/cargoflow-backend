@@ -1,7 +1,5 @@
-def test_dashboard_vacio_no_rompe(client, auth_headers):
-    """Sin ninguna operación todavía, el dashboard debe responder con ceros
-    y None en los promedios -- no debe dividir por cero ni tronar."""
-    resp = client.get("/reportes/dashboard", headers=auth_headers)
+def test_dashboard_vacio_no_rompe(client, gerente_headers):
+    resp = client.get("/reportes/dashboard", headers=gerente_headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["operaciones"]["total"] == 0
@@ -12,7 +10,12 @@ def test_dashboard_vacio_no_rompe(client, auth_headers):
     assert body["financiero"]["total_pendiente_cobro"] == 0
 
 
-def test_dashboard_cuenta_operaciones_por_estado(client, auth_headers, empresa_demo):
+def test_supervisor_no_puede_ver_dashboard(client, auth_headers):
+    resp = client.get("/reportes/dashboard", headers=auth_headers)
+    assert resp.status_code == 403
+
+
+def test_dashboard_cuenta_operaciones_por_estado(client, auth_headers, gerente_headers, empresa_demo):
     client.post(
         "/operaciones",
         json={"cliente_id": empresa_demo["cliente_id"], "servicio_id": empresa_demo["servicio_id"]},
@@ -34,14 +37,14 @@ def test_dashboard_cuenta_operaciones_por_estado(client, auth_headers, empresa_d
         headers=auth_headers,
     )
 
-    resp = client.get("/reportes/dashboard", headers=auth_headers)
+    resp = client.get("/reportes/dashboard", headers=gerente_headers)
     body = resp.json()
     assert body["operaciones"]["total"] == 2
     assert body["operaciones"]["por_estado"]["creada"] == 1
     assert body["operaciones"]["por_estado"]["asignada"] == 1
 
 
-def test_dashboard_calcula_tiempo_operativo_de_operacion_cerrada(client, auth_headers, empresa_demo):
+def test_dashboard_calcula_tiempo_operativo_de_operacion_cerrada(client, auth_headers, gerente_headers, empresa_demo):
     resp = client.post(
         "/operaciones",
         json={"cliente_id": empresa_demo["cliente_id"], "servicio_id": empresa_demo["servicio_id"]},
@@ -71,15 +74,15 @@ def test_dashboard_calcula_tiempo_operativo_de_operacion_cerrada(client, auth_he
         headers=auth_headers,
     )
 
-    resp = client.get("/reportes/dashboard", headers=auth_headers)
+    resp = client.get("/reportes/dashboard", headers=gerente_headers)
     body = resp.json()
     assert body["operaciones"]["tiempo_promedio_operativo_minutos"] is not None
     assert body["operaciones"]["tiempo_promedio_operativo_minutos"] >= 0
     assert body["financiero"]["total_liquidado_historico"] == 185000  # 1850 * 100
 
 
-def test_dashboard_calidad_refleja_inspecciones(client, auth_headers, proveedor_demo):
-    for defectos in (0, 8):  # una aceptada, una rechazada (codigo H: Ac=7, Re=8)
+def test_dashboard_calidad_refleja_inspecciones(client, auth_headers, gerente_headers, proveedor_demo):
+    for defectos in (0, 8):
         client.post(
             "/aql/inspecciones",
             json={
@@ -92,7 +95,7 @@ def test_dashboard_calidad_refleja_inspecciones(client, auth_headers, proveedor_
             headers=auth_headers,
         )
 
-    resp = client.get("/reportes/dashboard", headers=auth_headers)
+    resp = client.get("/reportes/dashboard", headers=gerente_headers)
     body = resp.json()
     assert body["calidad"]["total_inspecciones"] == 2
     assert body["calidad"]["tasa_aceptacion_pct"] == 50.0

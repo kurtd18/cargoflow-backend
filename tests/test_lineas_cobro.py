@@ -57,7 +57,7 @@ def test_agregar_linea_y_actualizar_cantidad(client, auth_headers, empresa_demo)
     assert len(resp.json()) == 1
 
 
-def test_cerrar_con_multiples_lineas_suma_la_liquidacion(client, auth_headers, empresa_demo):
+def test_cerrar_con_multiples_lineas_suma_la_liquidacion(client, auth_headers, gerente_headers, empresa_demo):
     op_id = _crear_y_asignar_solo_cuadrilla(client, auth_headers, empresa_demo)
 
     resp = client.post(
@@ -87,9 +87,8 @@ def test_cerrar_con_multiples_lineas_suma_la_liquidacion(client, auth_headers, e
     assert resp.status_code == 200, resp.text
 
     # 10 * 1850 + 3 * 5000 = 18500 + 15000 = 33500
-    resp_dash = client.get("/reportes/dashboard", headers=auth_headers)
+    resp_dash = client.get("/reportes/dashboard", headers=gerente_headers)
     assert resp_dash.json()["financiero"]["total_liquidado_historico"] == 33500
-
 
 def test_cerrar_multiples_lineas_sin_cantidad_da_400(client, auth_headers, empresa_demo):
     op_id = _crear_y_asignar_solo_cuadrilla(client, auth_headers, empresa_demo)

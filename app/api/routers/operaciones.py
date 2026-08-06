@@ -17,6 +17,7 @@ from app.schemas.operaciones import (
 router = APIRouter(prefix="/operaciones", tags=["operaciones"])
 
 TIPOS_EVIDENCIA_OBLIGATORIOS = {"pedido", "factura"}
+ROLES_OPERACION = ("supervisor", "operario")
 
 
 def _obtener_operacion(db: Session, operacion_id: uuid.UUID) -> Operacion:
@@ -40,7 +41,7 @@ def _calcular_valor(tarifa: Tarifa, cantidad_real: float) -> float:
 def crear_operacion(
     payload: OperacionCreate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "operario")),
 ):
     """UX Spec 4.1.1 — Crear operación."""
     operacion = Operacion(
@@ -63,7 +64,7 @@ def crear_operacion(
 def consultar_operacion(
     operacion_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "operario")),
 ):
     return _obtener_operacion(db, operacion_id)
 
@@ -73,7 +74,7 @@ def asignar_cuadrilla_y_tarifa(
     operacion_id: uuid.UUID,
     payload: OperacionAsignar,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor")),
+    current_user: CurrentUser = Depends(require_roles(*ROLES_OPERACION)),
 ):
     operacion = _obtener_operacion(db, operacion_id)
 
@@ -93,7 +94,7 @@ def agregar_linea_cobro(
     operacion_id: uuid.UUID,
     payload: LineaCobroCreate,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor")),
+    current_user: CurrentUser = Depends(require_roles(*ROLES_OPERACION)),
 ):
     operacion = _obtener_operacion(db, operacion_id)
     if operacion.estado not in ("asignada", "en_curso"):
@@ -121,7 +122,7 @@ def agregar_linea_cobro(
 def listar_lineas_cobro(
     operacion_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "operario")),
 ):
     _obtener_operacion(db, operacion_id)
     return db.scalars(
@@ -135,7 +136,7 @@ def actualizar_cantidad_linea(
     linea_id: uuid.UUID,
     payload: LineaCobroActualizarCantidad,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor")),
+    current_user: CurrentUser = Depends(require_roles(*ROLES_OPERACION)),
 ):
     linea = db.get(LineaCobro, linea_id)
     if not linea or linea.operacion_id != operacion_id:
@@ -150,7 +151,7 @@ def actualizar_cantidad_linea(
 def iniciar_operacion(
     operacion_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor")),
+    current_user: CurrentUser = Depends(require_roles(*ROLES_OPERACION)),
 ):
     operacion = _obtener_operacion(db, operacion_id)
 
@@ -176,7 +177,7 @@ def actualizar_cantidad(
     operacion_id: uuid.UUID,
     payload: OperacionActualizarCantidad,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor")),
+    current_user: CurrentUser = Depends(require_roles(*ROLES_OPERACION)),
 ):
     operacion = _obtener_operacion(db, operacion_id)
     if operacion.estado != "en_curso":
@@ -195,8 +196,10 @@ def cerrar_operacion(
     operacion_id: uuid.UUID,
     payload: OperacionCerrar,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor")),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
 ):
+    """Cerrar implica confirmar forma de pago -- se deja restringido a
+    supervisor/gerente, no a operario."""
     operacion = _obtener_operacion(db, operacion_id)
     if operacion.estado != "en_curso":
         raise HTTPException(

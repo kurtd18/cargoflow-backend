@@ -8,12 +8,9 @@ from sqlalchemy.orm import Session
 from app.api.deps import CurrentUser, get_db, require_roles
 from app.models.operaciones import Incidencia, Operacion
 from app.schemas.operaciones import IncidenciaOut
-from app.storage.incidencias import guardar_foto_incidencia
 
 router = APIRouter(prefix="/operaciones", tags=["incidencias"])
 
-# tipo libre a propósito (como en evidencias): reportar una incidencia nueva
-# no debería requerir una migración de esquema.
 TIPOS_INCIDENCIA_SUGERIDOS = {
     "mercancia_danada", "faltante", "retraso", "accidente",
     "problema_vehiculo", "conflicto_personal", "otro",
@@ -34,18 +31,15 @@ async def reportar_incidencia(
     descripcion: Optional[str] = Form(None),
     archivo: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "operario")),
 ):
-    """Reporta una incidencia sobre una operación. La foto es opcional
-    (Incidencia.foto_url es nullable en el modelo) — a diferencia de las
-    evidencias, una incidencia se puede registrar solo con descripción.
-    """
     _obtener_operacion(db, operacion_id)
 
     foto_url = None
     if archivo is not None:
+        from app.storage.evidencias import guardar_archivo_evidencia
         try:
-            foto_url = await guardar_foto_incidencia(archivo, operacion_id=operacion_id)
+            foto_url = await guardar_archivo_evidencia(archivo, operacion_id=operacion_id, tipo="incidencia")
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(e))
 
@@ -66,7 +60,7 @@ async def reportar_incidencia(
 def listar_incidencias(
     operacion_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "operario")),
 ):
     _obtener_operacion(db, operacion_id)
     return db.scalars(

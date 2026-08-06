@@ -10,7 +10,7 @@ from app.schemas.reportes import CalidadResumen, DashboardOut, FinancieroResumen
 
 router = APIRouter(prefix="/reportes", tags=["reportes"])
 
-ROLES_REPORTES = ("supervisor", "gerente", "auditor")
+ROLES_REPORTES = ("gerente", "administrador")
 
 
 @router.get("/dashboard", response_model=DashboardOut)
@@ -18,10 +18,6 @@ def dashboard(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*ROLES_REPORTES)),
 ):
-    """Métricas consolidadas: operaciones por estado y tiempos promedio,
-    calidad (AQL) y financiero (liquidado vs. pendiente de cobro) --
-    todo en una sola llamada para alimentar un dashboard."""
-
     filas_estado = db.execute(select(Operacion.estado, func.count(Operacion.id)).group_by(Operacion.estado)).all()
     por_estado = {estado: cantidad for estado, cantidad in filas_estado}
     total_operaciones = sum(por_estado.values())
