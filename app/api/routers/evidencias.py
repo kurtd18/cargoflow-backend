@@ -1,6 +1,8 @@
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,9 +14,6 @@ from app.storage.evidencias import guardar_archivo_evidencia
 
 router = APIRouter(prefix="/operaciones", tags=["evidencias"])
 
-# Lista completa según el comentario de Evidencia.tipo en app/models/operaciones.py.
-# Solo 'pedido' y 'factura' (TIPOS_EVIDENCIA_OBLIGATORIOS, importado de operaciones.py)
-# bloquean hoy el botón de iniciar — los demás son evidencia informativa.
 TIPOS_EVIDENCIA_VALIDOS = {
     "foto_llegada", "pedido", "factura", "foto_operacion", "firma_cliente",
     "soporte_pago", "foto_conductor", "foto_vehiculo", "evidencia_defecto_aql",
@@ -26,6 +25,13 @@ def _obtener_operacion(db: Session, operacion_id: uuid.UUID) -> Operacion:
     if not operacion:
         raise HTTPException(status_code=404, detail="Operación no encontrada")
     return operacion
+
+
+def _obtener_evidencia_de_operacion(db: Session, operacion_id: uuid.UUID, evidencia_id: uuid.UUID) -> Evidencia:
+    evidencia = db.get(Evidencia, evidencia_id)
+    if not evidencia or evidencia.operacion_id != operacion_id:
+        raise HTTPException(status_code=404, detail="Evidencia no encontrada")
+    return evidencia
 
 
 @router.post("/{operacion_id}/evidencias", response_model=EvidenciaOut, status_code=status.HTTP_201_CREATED)
@@ -69,14 +75,32 @@ def listar_evidencias(
     ).all()
 
 
+@router.get("/{operacion_id}/evidencias/{evidencia_id}/archivo")
+def descargar_evidencia(
+    operacion_id: uuid.UUID,
+    evidencia_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "auditor", "facturacion")),
+):
+    """Sirve el archivo real de una evidencia (Sección 5.10 del PRD:
+    'disponible para consulta y auditoría posterior'). Antes solo se
+    guardaba la ruta en la base de datos; no había forma de recuperar
+    el archivo en sí."""
+    _obtener_operacion(db, operacion_id)
+    evidencia = _obtener_evidencia_de_operacion(db, operacion_id, evidencia_id)
+
+    ruta = Path(evidencia.url_archivo)
+    if not ruta.exists():
+        raise HTTPException(status_code=404, detail="El archivo ya no está disponible en el servidor")
+    return FileResponse(ruta, filename=ruta.name)
+
+
 @router.get("/{operacion_id}/evidencias/estado", response_model=EvidenciasEstado)
 def estado_evidencias(
     operacion_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
 ):
-    """Para que el frontend muestre qué falta antes de que el usuario
-    choque con el 412 de /iniciar."""
     _obtener_operacion(db, operacion_id)
     presentes = {
         e.tipo for e in db.scalars(select(Evidencia).where(Evidencia.operacion_id == operacion_id))
