@@ -2,7 +2,9 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+CATEGORIAS_MERCANCIA_VALIDAS = {"viveres", "electro", "fruver"}
 
 
 class LoginRequest(BaseModel):
@@ -20,18 +22,36 @@ class OperacionCreate(BaseModel):
     servicio_id: uuid.UUID
     vehiculo_id: Optional[uuid.UUID] = None
     muelle: Optional[str] = None
+    categoria_mercancia: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validar_categoria(self):
+        if self.categoria_mercancia is not None and self.categoria_mercancia not in CATEGORIAS_MERCANCIA_VALIDAS:
+            raise ValueError(f"categoria_mercancia debe ser uno de: {', '.join(sorted(CATEGORIAS_MERCANCIA_VALIDAS))}")
+        return self
 
 
 class OperacionAsignar(BaseModel):
     cuadrilla_id: uuid.UUID
-    tarifa_id: uuid.UUID
-    criterio_cobro: str  # cajas | unidades | vehiculo
+    # tarifa_id/criterio_cobro: opcionales -- si se envían, la operación queda
+    # en modo "clásico" de una sola tarifa (Víveres/Electro). Si se omiten,
+    # la asignación solo fija la cuadrilla, y el cobro se arma después con
+    # una o más líneas (POST /operaciones/{id}/lineas) -- modo Fruver.
+    tarifa_id: Optional[uuid.UUID] = None
+    criterio_cobro: Optional[str] = None
     cantidad_estimada: Optional[float] = None
 
 
-class OperacionCerrar(BaseModel):
+class OperacionActualizarCantidad(BaseModel):
     cantidad_real: float
-    forma_pago: str  # contado | credito
+
+
+class OperacionCerrar(BaseModel):
+    # cantidad_real es obligatoria solo si la operación NO tiene líneas de
+    # cobro (modo clásico); si tiene líneas, cada línea trae su propia
+    # cantidad_real y este campo se ignora.
+    cantidad_real: Optional[float] = None
+    forma_pago: str
     medio_pago: Optional[str] = None
 
 
@@ -43,8 +63,30 @@ class OperacionOut(BaseModel):
     criterio_cobro: Optional[str]
     cantidad_estimada: Optional[float]
     cantidad_real: Optional[float]
+    categoria_mercancia: Optional[str]
     hora_inicio: Optional[datetime]
     hora_fin: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class LineaCobroCreate(BaseModel):
+    tarifa_id: uuid.UUID
+    cantidad_estimada: Optional[float] = None
+
+
+class LineaCobroActualizarCantidad(BaseModel):
+    cantidad_real: float
+
+
+class LineaCobroOut(BaseModel):
+    id: uuid.UUID
+    operacion_id: uuid.UUID
+    tarifa_id: uuid.UUID
+    cantidad_estimada: Optional[float]
+    cantidad_real: Optional[float]
+    creado_en: datetime
 
     class Config:
         from_attributes = True

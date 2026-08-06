@@ -18,13 +18,16 @@ class Operacion(Base):
     servicio_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("servicios.id"), nullable=False)
     vehiculo_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("vehiculos.id"), nullable=True)
     muelle: Mapped[str] = mapped_column(String, nullable=True)
+    categoria_mercancia: Mapped[str] = mapped_column(String, nullable=True)
     cuadrilla_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("cuadrillas.id"), nullable=True)
+    # tarifa_id/criterio_cobro/cantidad_estimada/cantidad_real: modo "clásico",
+    # una sola tarifa por operación (ej. Víveres/Electro por tipo de vehículo).
+    # Si la operación usa varias tarifas a la vez (ej. Fruver: descargue +
+    # trasvaseo), estos quedan NULL y el detalle vive en LineaCobro.
     tarifa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tarifas.id"), nullable=True)
-    # criterio_cobro: cajas | unidades | vehiculo (copiado de la tarifa al asignar, ver Sección 4.1.2 UX Spec)
     criterio_cobro: Mapped[str] = mapped_column(String, nullable=True)
     cantidad_estimada: Mapped[float] = mapped_column(Numeric, nullable=True)
     cantidad_real: Mapped[float] = mapped_column(Numeric, nullable=True)
-    # estado: creada | asignada | en_curso | pausada | finalizada | auditada | facturada | cerrada
     estado: Mapped[str] = mapped_column(String, default="creada")
     hora_inicio: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     hora_fin: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -33,13 +36,28 @@ class Operacion(Base):
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class LineaCobro(Base):
+    """Un concepto de cobro dentro de una operación (tarifa + cantidad).
+    Permite que UNA operación combine varios conceptos a la vez -- por
+    ejemplo, en Fruver: descargue por tonelada Y trasvaseo por tonelada
+    en la misma operación, cada uno con su propia tarifa y cantidad."""
+
+    __tablename__ = "lineas_cobro"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    empresa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("empresas.id"), nullable=False)
+    operacion_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operaciones.id"), nullable=False)
+    tarifa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tarifas.id"), nullable=False)
+    cantidad_estimada: Mapped[float] = mapped_column(Numeric, nullable=True)
+    cantidad_real: Mapped[float] = mapped_column(Numeric, nullable=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class Evidencia(Base):
     __tablename__ = "evidencias"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     operacion_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operaciones.id"), nullable=False)
-    # tipo: foto_llegada | pedido | factura | foto_operacion | firma_cliente |
-    #       soporte_pago | foto_conductor | foto_vehiculo | evidencia_defecto_aql
     tipo: Mapped[str] = mapped_column(String, nullable=False)
     url_archivo: Mapped[str] = mapped_column(String, nullable=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -62,11 +80,9 @@ class Pago(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     operacion_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("operaciones.id"), nullable=False)
-    # forma_pago: contado | credito -- ver PRD Sección 4.4
     forma_pago: Mapped[str] = mapped_column(String, nullable=False)
-    medio_pago: Mapped[str] = mapped_column(String, nullable=True)  # transferencia | datafono | efectivo
+    medio_pago: Mapped[str] = mapped_column(String, nullable=True)
     monto: Mapped[float] = mapped_column(Numeric, nullable=False)
-    # estado: pagado | pendiente_cobro (pendiente_cobro solo si forma_pago = credito)
     estado: Mapped[str] = mapped_column(String, nullable=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 

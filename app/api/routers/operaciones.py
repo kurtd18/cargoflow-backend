@@ -6,14 +6,24 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.api.deps import get_db, require_roles, CurrentUser
-from app.models.operaciones import Operacion, Evidencia, Pago, Liquidacion
+from app.models.operaciones import Operacion, Evidencia, Pago, Liquidacion, LineaCobro
 from app.models.recursos import Tarifa
 from app.models.plataforma import Cliente
-from app.schemas.operaciones import OperacionCreate, OperacionAsignar, OperacionCerrar, OperacionOut
+from app.schemas.operaciones import (
+    OperacionCreate, OperacionAsignar, OperacionActualizarCantidad, OperacionCerrar, OperacionOut,
+    LineaCobroCreate, LineaCobroActualizarCantidad, LineaCobroOut,
+)
 
 router = APIRouter(prefix="/operaciones", tags=["operaciones"])
 
 TIPOS_EVIDENCIA_OBLIGATORIOS = {"pedido", "factura"}
+
+
+def _obtener_operacion(db: Session, operacion_id: uuid.UUID) -> Operacion:
+    operacion = db.get(Operacion, operacion_id)
+    if not operacion:
+        raise HTTPException(status_code=404, detail="Operación no encontrada")
+    return operacion
 
 
 @router.post("", response_model=OperacionOut, status_code=status.HTTP_201_CREATED)
@@ -29,6 +39,7 @@ def crear_operacion(
         servicio_id=payload.servicio_id,
         vehiculo_id=payload.vehiculo_id,
         muelle=payload.muelle,
+        categoria_mercancia=payload.categoria_mercancia,
         estado="creada",
         creado_por=current_user.usuario_id,
     )
@@ -44,11 +55,7 @@ def consultar_operacion(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
 ):
-    """Consulta el estado actual de una operación."""
-    operacion = db.get(Operacion, operacion_id)
-    if not operacion:
-        raise HTTPException(status_code=404, detail="Operación no encontrada")
-    return operacion
+    return _obtener_operacion(db, operacion_id)
 
 
 @router.patch("/{operacion_id}/asignar", response_model=OperacionOut)
@@ -58,24 +65,83 @@ def asignar_cuadrilla_y_tarifa(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles("supervisor")),
 ):
-    """UX Spec 4.1.2 — Asignar cuadrilla y tarifa.
-
-    Regla de negocio: cantidad_estimada es solo referencial (PRD Sección 4.1);
-    nunca se usa para liquidar. Se guarda únicamente para mostrarla como
-    proyección en la pantalla "Operación en curso".
-    """
-    operacion = db.get(Operacion, operacion_id)
-    if not operacion:
-        raise HTTPException(status_code=404, detail="Operación no encontrada")
+    """UX Spec 4.1.2 — Asigna la cuadrilla siempre. La tarifa es opcional aquí:
+    si se envía, la operación queda en modo clásico de una sola tarifa
+    (Víveres/Electro); si no, el cobro se arma después con líneas
+    (POST /{id}/lineas), para operaciones tipo Fruver que combinan varios
+    conceptos."""
+    operacion = _obtener_operacion(db, operacion_id)
 
     operacion.cuadrilla_id = payload.cuadrilla_id
-    operacion.tarifa_id = payload.tarifa_id
-    operacion.criterio_cobro = payload.criterio_cobro
-    operacion.cantidad_estimada = payload.cantidad_estimada
+    if payload.tarifa_id is not None:
+        operacion.tarifa_id = payload.tarifa_id
+        operacion.criterio_cobro = payload.criterio_cobro
+        operacion.cantidad_estimada = payload.cantidad_estimada
     operacion.estado = "asignada"
     db.commit()
     db.refresh(operacion)
     return operacion
+
+
+@router.post("/{operacion_id}/lineas", response_model=LineaCobroOut, status_code=status.HTTP_201_CREATED)
+def agregar_linea_cobro(
+    operacion_id: uuid.UUID,
+    payload: LineaCobroCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles("supervisor")),
+):
+    """Agrega un concepto de cobro a la operación (tarifa + cantidad).
+    Una operación puede tener varias líneas a la vez -- ej. Fruver:
+    descargue por tonelada Y trasvaseo por tonelada en la misma operación."""
+    operacion = _obtener_operacion(db, operacion_id)
+    if operacion.estado not in ("asignada", "en_curso"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No se puede agregar una línea de cobro en estado '{operacion.estado}'",
+        )
+    tarifa = db.get(Tarifa, payload.tarifa_id)
+    if not tarifa:
+        raise HTTPException(status_code=404, detail="Tarifa no encontrada")
+
+    linea = LineaCobro(
+        empresa_id=current_user.empresa_id,
+        operacion_id=operacion_id,
+        tarifa_id=payload.tarifa_id,
+        cantidad_estimada=payload.cantidad_estimada,
+    )
+    db.add(linea)
+    db.commit()
+    db.refresh(linea)
+    return linea
+
+
+@router.get("/{operacion_id}/lineas", response_model=list[LineaCobroOut])
+def listar_lineas_cobro(
+    operacion_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
+):
+    _obtener_operacion(db, operacion_id)
+    return db.scalars(
+        select(LineaCobro).where(LineaCobro.operacion_id == operacion_id).order_by(LineaCobro.creado_en)
+    ).all()
+
+
+@router.patch("/{operacion_id}/lineas/{linea_id}/cantidad", response_model=LineaCobroOut)
+def actualizar_cantidad_linea(
+    operacion_id: uuid.UUID,
+    linea_id: uuid.UUID,
+    payload: LineaCobroActualizarCantidad,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles("supervisor")),
+):
+    linea = db.get(LineaCobro, linea_id)
+    if not linea or linea.operacion_id != operacion_id:
+        raise HTTPException(status_code=404, detail="Línea de cobro no encontrada")
+    linea.cantidad_real = payload.cantidad_real
+    db.commit()
+    db.refresh(linea)
+    return linea
 
 
 @router.post("/{operacion_id}/iniciar", response_model=OperacionOut)
@@ -84,12 +150,7 @@ def iniciar_operacion(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles("supervisor")),
 ):
-    """UX Spec 4.1.2 — el botón "Iniciar operación" exige que ya existan
-    las evidencias obligatorias de pedido y factura (regla transversal, UX Spec Sección 5).
-    """
-    operacion = db.get(Operacion, operacion_id)
-    if not operacion:
-        raise HTTPException(status_code=404, detail="Operación no encontrada")
+    operacion = _obtener_operacion(db, operacion_id)
 
     tipos_cargados = {
         e.tipo for e in db.scalars(select(Evidencia).where(Evidencia.operacion_id == operacion_id))
@@ -108,6 +169,25 @@ def iniciar_operacion(
     return operacion
 
 
+@router.patch("/{operacion_id}/cantidad", response_model=OperacionOut)
+def actualizar_cantidad(
+    operacion_id: uuid.UUID,
+    payload: OperacionActualizarCantidad,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles("supervisor")),
+):
+    operacion = _obtener_operacion(db, operacion_id)
+    if operacion.estado != "en_curso":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No se puede actualizar la cantidad en estado '{operacion.estado}'; debe estar en_curso",
+        )
+    operacion.cantidad_real = payload.cantidad_real
+    db.commit()
+    db.refresh(operacion)
+    return operacion
+
+
 @router.post("/{operacion_id}/cerrar", response_model=OperacionOut)
 def cerrar_operacion(
     operacion_id: uuid.UUID,
@@ -117,23 +197,22 @@ def cerrar_operacion(
 ):
     """UX Spec 4.1.5 — Cerrar operación.
 
-    Regla de negocio central (PRD Sección 4.1 y 4.4, confirmada en el chat de diseño):
-    la liquidación SIEMPRE se calcula con cantidad_real, nunca con cantidad_estimada.
-    La forma de pago a crédito solo es válida si el cliente está registrado como tal.
+    Dos modos:
+    - Con líneas de cobro (Fruver): liquida cada línea por separado con su
+      propia tarifa y cantidad_real, y suma el total para el pago.
+    - Sin líneas (modo clásico, ej. Víveres/Electro): usa la tarifa única
+      de la operación y la cantidad_real del body, como siempre.
 
-    Solo se puede cerrar una operación que ya está en_curso (fue iniciada) —
-    no se puede cerrar una operación creada/asignada que nunca arrancó.
+    En ambos casos: la liquidación SIEMPRE usa cantidad_real, nunca la
+    estimada. forma_pago='credito' solo es válida si el cliente está
+    registrado como tal.
     """
-    operacion = db.get(Operacion, operacion_id)
-    if not operacion:
-        raise HTTPException(status_code=404, detail="Operación no encontrada")
+    operacion = _obtener_operacion(db, operacion_id)
     if operacion.estado != "en_curso":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"No se puede cerrar una operación en estado '{operacion.estado}'; debe estar en_curso",
         )
-    if not operacion.tarifa_id:
-        raise HTTPException(status_code=400, detail="La operación no tiene tarifa asignada")
 
     if payload.forma_pago == "credito":
         cliente = db.get(Cliente, operacion.cliente_id)
@@ -143,27 +222,53 @@ def cerrar_operacion(
                 detail="Este cliente no está registrado con condición de crédito",
             )
 
-    operacion.cantidad_real = payload.cantidad_real
+    lineas = db.scalars(select(LineaCobro).where(LineaCobro.operacion_id == operacion_id)).all()
+
+    if lineas:
+        valor_total = 0.0
+        for linea in lineas:
+            if linea.cantidad_real is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Falta registrar cantidad_real en la línea {linea.id} antes de cerrar",
+                )
+            tarifa = db.get(Tarifa, linea.tarifa_id)
+            valor_calculado = float(linea.cantidad_real) * float(tarifa.valor)
+            valor_total += valor_calculado
+            db.add(Liquidacion(
+                operacion_id=operacion.id,
+                tarifa_id=tarifa.id,
+                cantidad_real=linea.cantidad_real,
+                valor_calculado=valor_calculado,
+            ))
+    else:
+        if not operacion.tarifa_id:
+            raise HTTPException(status_code=400, detail="La operación no tiene tarifa asignada")
+        if payload.cantidad_real is None:
+            raise HTTPException(
+                status_code=400,
+                detail="cantidad_real es obligatoria para cerrar una operación sin líneas de cobro",
+            )
+        tarifa = db.get(Tarifa, operacion.tarifa_id)
+        valor_total = float(payload.cantidad_real) * float(tarifa.valor)
+        operacion.cantidad_real = payload.cantidad_real
+        db.add(Liquidacion(
+            operacion_id=operacion.id,
+            tarifa_id=tarifa.id,
+            cantidad_real=payload.cantidad_real,
+            valor_calculado=valor_total,
+        ))
+
     operacion.estado = "finalizada"
     operacion.hora_fin = datetime.now(timezone.utc)
 
-    tarifa = db.get(Tarifa, operacion.tarifa_id)
-    valor_calculado = float(payload.cantidad_real) * float(tarifa.valor)
-
-    liquidacion = Liquidacion(
-        operacion_id=operacion.id,
-        tarifa_id=tarifa.id,
-        cantidad_real=payload.cantidad_real,
-        valor_calculado=valor_calculado,
-    )
-    pago = Pago(
+    db.add(Pago(
         operacion_id=operacion.id,
         forma_pago=payload.forma_pago,
         medio_pago=payload.medio_pago,
-        monto=valor_calculado,
+        monto=valor_total,
         estado="pendiente_cobro" if payload.forma_pago == "credito" else "pagado",
-    )
-    db.add_all([liquidacion, pago])
+    ))
     db.commit()
     db.refresh(operacion)
     return operacion
