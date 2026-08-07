@@ -9,7 +9,7 @@ from app.api.deps import CurrentUser, get_db, require_roles
 from app.models.calidad import InspeccionAQL
 from app.models.plataforma import Proveedor
 from app.schemas.aql import InspeccionAQLCreate, InspeccionAQLOut, PlanMuestreoOut
-from app.services.aql import AQLError, calcular_plan_muestreo, evaluar_resultado, recalcular_severidad
+from app.services.aql import AQLError, calcular_plan_muestreo, decidir_resultado_checklist, recalcular_severidad
 
 router = APIRouter(prefix="/aql", tags=["aql"])
 
@@ -42,9 +42,16 @@ def crear_inspeccion(
 
     try:
         plan = calcular_plan_muestreo(payload.tamano_lote, payload.nivel_inspeccion_general, payload.aql)
-        resultado = evaluar_resultado(payload.defectos_encontrados, plan.limite_aceptacion, plan.limite_rechazo)
     except AQLError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+
+    defectos_criticos = sum(i.cantidad for i in payload.checklist if not i.conforme and i.severidad == "critico")
+    defectos_mayores = sum(i.cantidad for i in payload.checklist if not i.conforme and i.severidad == "mayor")
+    defectos_menores = sum(i.cantidad for i in payload.checklist if not i.conforme and i.severidad == "menor")
+
+    resultado = decidir_resultado_checklist(
+        defectos_criticos, defectos_mayores, defectos_menores, plan.limite_aceptacion, plan.limite_rechazo,
+    )
 
     inspeccion = InspeccionAQL(
         empresa_id=current_user.empresa_id,
@@ -58,7 +65,10 @@ def crear_inspeccion(
         tamano_muestra=plan.tamano_muestra,
         limite_aceptacion=plan.limite_aceptacion,
         limite_rechazo=plan.limite_rechazo,
-        defectos_encontrados=payload.defectos_encontrados,
+        defectos_criticos=defectos_criticos,
+        defectos_mayores=defectos_mayores,
+        defectos_menores=defectos_menores,
+        checklist=[i.model_dump() for i in payload.checklist],
         resultado=resultado,
         creado_por=current_user.usuario_id,
     )

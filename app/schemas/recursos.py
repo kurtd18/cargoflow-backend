@@ -5,7 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, model_validator
 
 CRITERIOS_VALIDOS = {"cajas", "unidades", "vehiculo", "toneladas"}
-CATEGORIAS_MERCANCIA_VALIDAS = {"viveres", "electro", "fruver"}
+CATEGORIAS_MERCANCIA_VALIDAS = {"viveres", "electro", "fruver", "medicamentos", "refrigerados", "congelados", "pop"}
 TIPOS_SANGRE_VALIDOS = {"O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"}
 
 

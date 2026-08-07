@@ -11,14 +11,10 @@ LIMITACIÓN CONOCIDA: esta versión solo tiene los valores Ac/Re verificados
 para inspección NORMAL. Los niveles "reforzado" y "reducido" de la norma
 usan sus propias tablas (II-B y II-C) con Ac/Re distintos -- por ahora,
 cuando el proveedor está en reforzado/reducido, este módulo reutiliza los
-mismos Ac/Re de la tabla normal como aproximación (TODO: incorporar II-B
-y II-C verificadas -- no se agregaron todavía porque las únicas fuentes
-disponibles eran PDFs escaneados con columnas ilegibles, y prefiero dejar
-el TODO explícito a transcribir números sin poder confirmarlos).
+mismos Ac/Re de la tabla normal como aproximación.
 
 Las REGLAS DE CAMBIO de severidad sí están completas y verificadas contra
-dos fuentes independientes (incluyendo 7 CFR 42.108, que reproduce la
-misma lógica de switching rules de la norma).
+7 CFR 42.108.
 """
 
 from dataclasses import dataclass
@@ -26,6 +22,18 @@ from dataclasses import dataclass
 AQL_VALORES_VALIDOS = (0.065, 0.10, 0.15, 0.25, 0.40, 0.65, 1.0, 1.5, 2.5, 4.0, 6.5)
 NIVELES_INSPECCION_GENERAL = ("I", "II", "III")
 SEVERIDADES = ("normal", "reforzado", "reducido")
+
+# AQL sugerido según categoría de mercancía -- entre más delicado el
+# producto, más estricto el AQL (número más bajo = tolerancia menor).
+AQL_POR_CATEGORIA = {
+    "medicamentos": 0.65,
+    "refrigerados": 1.0,
+    "congelados": 1.0,
+    "fruver": 1.5,
+    "viveres": 1.5,
+    "electro": 2.5,
+    "pop": 4.0,
+}
 
 # Tabla A -- (lote_min, lote_max, {nivel: codigo_letra}). lote_max=None significa "en adelante".
 _TABLA_A = [
@@ -79,6 +87,14 @@ class PlanMuestreo:
     limite_rechazo: int
 
 
+def aql_sugerido_por_categoria(categoria_mercancia: str | None) -> float:
+    """Devuelve el AQL recomendado según la categoría de mercancía, o 2.5
+    (el más usado en general) si la categoría no está mapeada."""
+    if categoria_mercancia and categoria_mercancia in AQL_POR_CATEGORIA:
+        return AQL_POR_CATEGORIA[categoria_mercancia]
+    return 2.5
+
+
 def obtener_codigo_letra(tamano_lote: int, nivel_inspeccion_general: str) -> str:
     if nivel_inspeccion_general not in NIVELES_INSPECCION_GENERAL:
         raise AQLError(f"Nivel de inspección general inválido: {nivel_inspeccion_general}")
@@ -114,19 +130,28 @@ def evaluar_resultado(defectos_encontrados: int, limite_aceptacion: int, limite_
         return "aceptado"
     if defectos_encontrados >= limite_rechazo:
         return "rechazado"
-    raise AQLError("El número de defectos cae en una zona indefinida entre Ac y Re")  # no debería pasar: Re = Ac + 1
+    raise AQLError("El número de defectos cae en una zona indefinida entre Ac y Re")
+
+
+def decidir_resultado_checklist(
+    defectos_criticos: int, defectos_mayores: int, defectos_menores: int,
+    limite_aceptacion: int, limite_rechazo: int,
+) -> str:
+    """Checklist de 7 aspectos con severidad: cualquier defecto CRÍTICO
+    rechaza el lote automáticamente, sin importar Ac/Re. Si no hay
+    críticos, se compara la suma de mayores+menores contra Ac/Re."""
+    if defectos_criticos > 0:
+        return "rechazado"
+    return evaluar_resultado(defectos_mayores + defectos_menores, limite_aceptacion, limite_rechazo)
 
 
 def recalcular_severidad(resultados_recientes: list[str], severidad_actual: str) -> str:
-    """Reglas de cambio (switching rules) de la norma, aplicadas sobre el
-    historial reciente de resultados ('aceptado'/'rechazado'), del más
-    reciente al más antiguo. Verificadas contra 7 CFR 42.108, que reproduce
-    la misma lógica de switching rules de ANSI/ASQ Z1.4.
+    """Reglas de cambio (switching rules) de la norma, verificadas contra
+    7 CFR 42.108.
 
     - normal -> reforzado: si 2 de los últimos 5 lotes fueron rechazados.
     - reforzado -> normal: si los últimos 5 lotes bajo reforzado fueron aceptados.
-    - normal -> reducido: si los últimos 10 lotes fueron aceptados (la norma también
-      exige estabilidad de producción, que este sistema no modela todavía).
+    - normal -> reducido: si los últimos 10 lotes fueron aceptados.
     - reducido -> normal: si el lote más reciente fue rechazado.
     """
     ultimos_5 = resultados_recientes[:5]

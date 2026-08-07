@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, model_validator
 
-CATEGORIAS_MERCANCIA_VALIDAS = {"viveres", "electro", "fruver"}
+CATEGORIAS_MERCANCIA_VALIDAS = {"viveres", "electro", "fruver", "medicamentos", "refrigerados", "congelados", "pop"}
 
 
 class LoginRequest(BaseModel):
