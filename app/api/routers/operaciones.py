@@ -28,10 +28,6 @@ def _obtener_operacion(db: Session, operacion_id: uuid.UUID) -> Operacion:
 
 
 def _calcular_valor(tarifa: Tarifa, cantidad_real: float) -> float:
-    """criterio='vehiculo': tarifa plana por todo el vehículo, no se
-    multiplica por la cantidad de cajas/unidades manejadas -- esa cantidad
-    se sigue registrando (para AQL y productividad), simplemente no entra
-    en el cálculo del cobro cuando el criterio es por vehículo."""
     if tarifa.criterio == "vehiculo":
         return float(tarifa.valor)
     return float(cantidad_real) * float(tarifa.valor)
@@ -43,11 +39,11 @@ def crear_operacion(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "operario")),
 ):
-    """UX Spec 4.1.1 — Crear operación."""
     operacion = Operacion(
         empresa_id=current_user.empresa_id,
         cliente_id=payload.cliente_id,
         servicio_id=payload.servicio_id,
+        proveedor_id=payload.proveedor_id,
         vehiculo_id=payload.vehiculo_id,
         muelle=payload.muelle,
         categoria_mercancia=payload.categoria_mercancia,
@@ -98,10 +94,7 @@ def agregar_linea_cobro(
 ):
     operacion = _obtener_operacion(db, operacion_id)
     if operacion.estado not in ("asignada", "en_curso"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No se puede agregar una línea de cobro en estado '{operacion.estado}'",
-        )
+        raise HTTPException(status_code=400, detail=f"No se puede agregar una línea de cobro en estado '{operacion.estado}'")
     tarifa = db.get(Tarifa, payload.tarifa_id)
     if not tarifa:
         raise HTTPException(status_code=404, detail="Tarifa no encontrada")
@@ -125,9 +118,7 @@ def listar_lineas_cobro(
     current_user: CurrentUser = Depends(require_roles("supervisor", "gerente", "operario")),
 ):
     _obtener_operacion(db, operacion_id)
-    return db.scalars(
-        select(LineaCobro).where(LineaCobro.operacion_id == operacion_id).order_by(LineaCobro.creado_en)
-    ).all()
+    return db.scalars(select(LineaCobro).where(LineaCobro.operacion_id == operacion_id).order_by(LineaCobro.creado_en)).all()
 
 
 @router.patch("/{operacion_id}/lineas/{linea_id}/cantidad", response_model=LineaCobroOut)
@@ -155,15 +146,10 @@ def iniciar_operacion(
 ):
     operacion = _obtener_operacion(db, operacion_id)
 
-    tipos_cargados = {
-        e.tipo for e in db.scalars(select(Evidencia).where(Evidencia.operacion_id == operacion_id))
-    }
+    tipos_cargados = {e.tipo for e in db.scalars(select(Evidencia).where(Evidencia.operacion_id == operacion_id))}
     faltantes = TIPOS_EVIDENCIA_OBLIGATORIOS - tipos_cargados
     if faltantes:
-        raise HTTPException(
-            status_code=status.HTTP_412_PRECONDITION_FAILED,
-            detail=f"Faltan evidencias obligatorias antes de iniciar: {', '.join(sorted(faltantes))}",
-        )
+        raise HTTPException(status_code=412, detail=f"Faltan evidencias obligatorias antes de iniciar: {', '.join(sorted(faltantes))}")
 
     operacion.estado = "en_curso"
     operacion.hora_inicio = datetime.now(timezone.utc)
@@ -181,10 +167,7 @@ def actualizar_cantidad(
 ):
     operacion = _obtener_operacion(db, operacion_id)
     if operacion.estado != "en_curso":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No se puede actualizar la cantidad en estado '{operacion.estado}'; debe estar en_curso",
-        )
+        raise HTTPException(status_code=400, detail=f"No se puede actualizar la cantidad en estado '{operacion.estado}'; debe estar en_curso")
     operacion.cantidad_real = payload.cantidad_real
     db.commit()
     db.refresh(operacion)
@@ -198,22 +181,14 @@ def cerrar_operacion(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles("supervisor", "gerente")),
 ):
-    """Cerrar implica confirmar forma de pago -- se deja restringido a
-    supervisor/gerente, no a operario."""
     operacion = _obtener_operacion(db, operacion_id)
     if operacion.estado != "en_curso":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No se puede cerrar una operación en estado '{operacion.estado}'; debe estar en_curso",
-        )
+        raise HTTPException(status_code=400, detail=f"No se puede cerrar una operación en estado '{operacion.estado}'; debe estar en_curso")
 
     if payload.forma_pago == "credito":
         cliente = db.get(Cliente, operacion.cliente_id)
         if not cliente or cliente.condicion_pago != "credito":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Este cliente no está registrado con condición de crédito",
-            )
+            raise HTTPException(status_code=400, detail="Este cliente no está registrado con condición de crédito")
 
     lineas = db.scalars(select(LineaCobro).where(LineaCobro.operacion_id == operacion_id)).all()
 
@@ -221,36 +196,20 @@ def cerrar_operacion(
         valor_total = 0.0
         for linea in lineas:
             if linea.cantidad_real is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Falta registrar cantidad_real en la línea {linea.id} antes de cerrar",
-                )
+                raise HTTPException(status_code=400, detail=f"Falta registrar cantidad_real en la línea {linea.id} antes de cerrar")
             tarifa = db.get(Tarifa, linea.tarifa_id)
             valor_calculado = _calcular_valor(tarifa, linea.cantidad_real)
             valor_total += valor_calculado
-            db.add(Liquidacion(
-                operacion_id=operacion.id,
-                tarifa_id=tarifa.id,
-                cantidad_real=linea.cantidad_real,
-                valor_calculado=valor_calculado,
-            ))
+            db.add(Liquidacion(operacion_id=operacion.id, tarifa_id=tarifa.id, cantidad_real=linea.cantidad_real, valor_calculado=valor_calculado))
     else:
         if not operacion.tarifa_id:
             raise HTTPException(status_code=400, detail="La operación no tiene tarifa asignada")
         if payload.cantidad_real is None:
-            raise HTTPException(
-                status_code=400,
-                detail="cantidad_real es obligatoria para cerrar una operación sin líneas de cobro",
-            )
+            raise HTTPException(status_code=400, detail="cantidad_real es obligatoria para cerrar una operación sin líneas de cobro")
         tarifa = db.get(Tarifa, operacion.tarifa_id)
         valor_total = _calcular_valor(tarifa, payload.cantidad_real)
         operacion.cantidad_real = payload.cantidad_real
-        db.add(Liquidacion(
-            operacion_id=operacion.id,
-            tarifa_id=tarifa.id,
-            cantidad_real=payload.cantidad_real,
-            valor_calculado=valor_total,
-        ))
+        db.add(Liquidacion(operacion_id=operacion.id, tarifa_id=tarifa.id, cantidad_real=payload.cantidad_real, valor_calculado=valor_total))
 
     operacion.estado = "finalizada"
     operacion.hora_fin = datetime.now(timezone.utc)

@@ -6,10 +6,11 @@ from pydantic import BaseModel, model_validator
 
 CRITERIOS_VALIDOS = {"cajas", "unidades", "vehiculo", "toneladas"}
 CATEGORIAS_MERCANCIA_VALIDAS = {"viveres", "electro", "fruver"}
+TIPOS_SANGRE_VALIDOS = {"O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"}
 
 
 class TarifaCreate(BaseModel):
-    cliente_id: Optional[uuid.UUID] = None  # None = tarifa general de la empresa
+    cliente_id: Optional[uuid.UUID] = None
     servicio_id: uuid.UUID
     criterio: str
     valor: float
@@ -87,6 +88,36 @@ class TipoVehiculoOut(BaseModel):
     empresa_id: uuid.UUID
     nombre: str
     tarifa_base: float
+
+    class Config:
+        from_attributes = True
+
+
+class OperarioCreate(BaseModel):
+    nombre: str
+    cedula: str
+    tipo_sangre: Optional[str] = None
+    cuadrilla_id: Optional[uuid.UUID] = None
+
+    @model_validator(mode="after")
+    def _validar_tipo_sangre(self):
+        if self.tipo_sangre is not None and self.tipo_sangre not in TIPOS_SANGRE_VALIDOS:
+            raise ValueError(f"tipo_sangre debe ser uno de: {', '.join(sorted(TIPOS_SANGRE_VALIDOS))}")
+        return self
+
+
+class OperarioAsignarCuadrilla(BaseModel):
+    cuadrilla_id: Optional[uuid.UUID] = None  # None = desasignar de cualquier cuadrilla
+
+
+class OperarioOut(BaseModel):
+    id: uuid.UUID
+    empresa_id: uuid.UUID
+    nombre: str
+    cedula: str
+    tipo_sangre: Optional[str]
+    cuadrilla_id: Optional[uuid.UUID]
+    activo: bool
 
     class Config:
         from_attributes = True

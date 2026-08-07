@@ -19,3 +19,11 @@ class ProveedorOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class MuestraAQLOut(BaseModel):
+    severidad_actual: str
+    codigo_letra: str
+    tamano_muestra: int
+    limite_aceptacion: int
+    limite_rechazo: int

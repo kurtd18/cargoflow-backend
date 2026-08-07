@@ -20,6 +20,7 @@ class TokenResponse(BaseModel):
 class OperacionCreate(BaseModel):
     cliente_id: uuid.UUID
     servicio_id: uuid.UUID
+    proveedor_id: Optional[uuid.UUID] = None
     vehiculo_id: Optional[uuid.UUID] = None
     muelle: Optional[str] = None
     categoria_mercancia: Optional[str] = None
@@ -33,10 +34,6 @@ class OperacionCreate(BaseModel):
 
 class OperacionAsignar(BaseModel):
     cuadrilla_id: uuid.UUID
-    # tarifa_id/criterio_cobro: opcionales -- si se envían, la operación queda
-    # en modo "clásico" de una sola tarifa (Víveres/Electro). Si se omiten,
-    # la asignación solo fija la cuadrilla, y el cobro se arma después con
-    # una o más líneas (POST /operaciones/{id}/lineas) -- modo Fruver.
     tarifa_id: Optional[uuid.UUID] = None
     criterio_cobro: Optional[str] = None
     cantidad_estimada: Optional[float] = None
@@ -47,9 +44,6 @@ class OperacionActualizarCantidad(BaseModel):
 
 
 class OperacionCerrar(BaseModel):
-    # cantidad_real es obligatoria solo si la operación NO tiene líneas de
-    # cobro (modo clásico); si tiene líneas, cada línea trae su propia
-    # cantidad_real y este campo se ignora.
     cantidad_real: Optional[float] = None
     forma_pago: str
     medio_pago: Optional[str] = None
@@ -59,6 +53,7 @@ class OperacionOut(BaseModel):
     id: uuid.UUID
     empresa_id: uuid.UUID
     cliente_id: uuid.UUID
+    proveedor_id: Optional[uuid.UUID] = None
     estado: str
     criterio_cobro: Optional[str]
     cantidad_estimada: Optional[float]

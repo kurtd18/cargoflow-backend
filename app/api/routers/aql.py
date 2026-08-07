@@ -13,7 +13,7 @@ from app.services.aql import AQLError, calcular_plan_muestreo, evaluar_resultado
 
 router = APIRouter(prefix="/aql", tags=["aql"])
 
-ROLES_AQL = ("supervisor", "gerente", "auditor")
+ROLES_AQL = ("supervisor", "gerente", "auditor", "operario")
 
 
 @router.get("/plan", response_model=PlanMuestreoOut)
@@ -23,18 +23,11 @@ def calcular_plan(
     aql: float = Query(2.5),
     current_user: CurrentUser = Depends(require_roles(*ROLES_AQL)),
 ):
-    """Calculadora del plan de muestreo, sin persistir nada -- para
-    previsualizar cuantas unidades hay que inspeccionar antes de hacerlo."""
     try:
         plan = calcular_plan_muestreo(tamano_lote, nivel_inspeccion_general, aql)
     except AQLError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    return PlanMuestreoOut(
-        codigo_letra=plan.codigo_letra,
-        tamano_muestra=plan.tamano_muestra,
-        limite_aceptacion=plan.limite_aceptacion,
-        limite_rechazo=plan.limite_rechazo,
-    )
+    return PlanMuestreoOut(codigo_letra=plan.codigo_letra, tamano_muestra=plan.tamano_muestra, limite_aceptacion=plan.limite_aceptacion, limite_rechazo=plan.limite_rechazo)
 
 
 @router.post("/inspecciones", response_model=InspeccionAQLOut, status_code=status.HTTP_201_CREATED)
@@ -43,9 +36,6 @@ def crear_inspeccion(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*ROLES_AQL)),
 ):
-    """Registra una inspeccion AQL real y actualiza automaticamente la
-    severidad (normal/reforzado/reducido) del proveedor segun las reglas
-    de cambio de la norma (ver app.services.aql.recalcular_severidad)."""
     proveedor = db.get(Proveedor, payload.proveedor_id)
     if not proveedor:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
@@ -76,9 +66,7 @@ def crear_inspeccion(
     db.flush()
 
     historial = db.scalars(
-        select(InspeccionAQL.resultado)
-        .where(InspeccionAQL.proveedor_id == payload.proveedor_id)
-        .order_by(InspeccionAQL.creado_en.desc())
+        select(InspeccionAQL.resultado).where(InspeccionAQL.proveedor_id == payload.proveedor_id).order_by(InspeccionAQL.creado_en.desc())
     ).all()
     nueva_severidad = recalcular_severidad(list(historial), proveedor.nivel_inspeccion_actual)
     proveedor.nivel_inspeccion_actual = nueva_severidad
