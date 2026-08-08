@@ -21,8 +21,14 @@ class ProveedorOut(BaseModel):
         from_attributes = True
 
 
+class ImportacionExcelOut(BaseModel):
+    creados: int
+    omitidos: int
+
+
 class MuestraAQLOut(BaseModel):
     severidad_actual: str
+    aql: float
     codigo_letra: str
     tamano_muestra: int
     limite_aceptacion: int
