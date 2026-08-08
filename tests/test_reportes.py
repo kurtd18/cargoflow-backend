@@ -82,13 +82,13 @@ def test_dashboard_calcula_tiempo_operativo_de_operacion_cerrada(client, auth_he
 
 
 def test_dashboard_calidad_refleja_inspecciones(client, auth_headers, gerente_headers, proveedor_demo):
-    items = ["estado_fisico", "cantidades", "empaque", "etiquetado", "fechas_vencimiento", "condiciones_temperatura", "lote_trazabilidad"]
+    items = ["estado_fisico", "cantidades", "fechas_vencimiento"]
     checklist_ok = [{"item": i, "conforme": True} for i in items]
     checklist_rechazo = [{"item": i, "conforme": True} for i in items]
     checklist_rechazo[0] = {"item": "estado_fisico", "conforme": False, "cantidad": 1, "severidad": "critico"}
 
     for checklist in (checklist_ok, checklist_rechazo):
-        client.post(
+        resp = client.post(
             "/aql/inspecciones",
             json={
                 "proveedor_id": proveedor_demo, "tamano_lote": 300,
@@ -96,6 +96,7 @@ def test_dashboard_calidad_refleja_inspecciones(client, auth_headers, gerente_he
             },
             headers=auth_headers,
         )
+        assert resp.status_code == 201, resp.text
 
     resp = client.get("/reportes/dashboard", headers=gerente_headers)
     body = resp.json()

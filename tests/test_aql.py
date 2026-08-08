@@ -2,7 +2,7 @@ import uuid
 
 
 def _checklist_todo_conforme():
-    items = ["estado_fisico", "cantidades", "empaque", "etiquetado", "fechas_vencimiento", "condiciones_temperatura", "lote_trazabilidad"]
+    items = ["estado_fisico", "cantidades", "fechas_vencimiento"]
     return [{"item": i, "conforme": True} for i in items]
 
 
@@ -62,11 +62,10 @@ def test_mayores_y_menores_se_suman_para_la_decision(client, auth_headers, prove
 def test_checklist_incompleto_da_422(client, auth_headers, proveedor_demo):
     resp = client.post(
         "/aql/inspecciones",
-        json={"proveedor_id": proveedor_demo, "tamano_lote": 300, "checklist": _checklist_todo_conforme()[:3]},
+        json={"proveedor_id": proveedor_demo, "tamano_lote": 300, "checklist": _checklist_todo_conforme()[:2]},
         headers=auth_headers,
     )
     assert resp.status_code == 422
-
 
 def test_diez_aceptados_activan_severidad_reducida(client, auth_headers, proveedor_demo):
     for _ in range(10):

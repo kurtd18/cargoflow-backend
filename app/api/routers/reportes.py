@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends
+from datetime import date, datetime, time, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -15,35 +18,56 @@ ROLES_REPORTES = ("gerente", "administrador")
 
 @router.get("/dashboard", response_model=DashboardOut)
 def dashboard(
+    desde: Optional[date] = Query(None, description="Por defecto, hoy"),
+    hasta: Optional[date] = Query(None, description="Por defecto, hoy"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(*ROLES_REPORTES)),
 ):
-    filas_estado = db.execute(select(Operacion.estado, func.count(Operacion.id)).group_by(Operacion.estado)).all()
+    """Resumen del período [desde, hasta] -- si no se especifican fechas,
+    muestra solo el día de hoy. Para un histórico completo, pasa un rango
+    amplio (ej. desde=2020-01-01)."""
+    hoy = datetime.now(timezone.utc).date()
+    desde = desde or hoy
+    hasta = hasta or hoy
+    inicio = datetime.combine(desde, time.min, tzinfo=timezone.utc)
+    fin = datetime.combine(hasta, time.max, tzinfo=timezone.utc)
+
+    filtro_operacion = Operacion.creado_en.between(inicio, fin)
+    filtro_aql = InspeccionAQL.creado_en.between(inicio, fin)
+    filtro_liquidacion = Liquidacion.creado_en.between(inicio, fin)
+    filtro_pago = Pago.creado_en.between(inicio, fin)
+
+    filas_estado = db.execute(
+        select(Operacion.estado, func.count(Operacion.id)).where(filtro_operacion).group_by(Operacion.estado)
+    ).all()
     por_estado = {estado: cantidad for estado, cantidad in filas_estado}
     total_operaciones = sum(por_estado.values())
 
     duracion_ciclo_seg = db.execute(
         select(func.avg(func.extract("epoch", Operacion.hora_fin - Operacion.creado_en)))
-        .where(Operacion.hora_fin.is_not(None))
+        .where(filtro_operacion, Operacion.hora_fin.is_not(None))
     ).scalar()
 
     duracion_operativa_seg = db.execute(
         select(func.avg(func.extract("epoch", Operacion.hora_fin - Operacion.hora_inicio)))
-        .where(Operacion.hora_fin.is_not(None), Operacion.hora_inicio.is_not(None))
+        .where(filtro_operacion, Operacion.hora_fin.is_not(None), Operacion.hora_inicio.is_not(None))
     ).scalar()
 
-    total_inspecciones = db.execute(select(func.count(InspeccionAQL.id))).scalar() or 0
+    total_inspecciones = db.execute(select(func.count(InspeccionAQL.id)).where(filtro_aql)).scalar() or 0
     aceptadas = db.execute(
-        select(func.count(InspeccionAQL.id)).where(InspeccionAQL.resultado == "aceptado")
+        select(func.count(InspeccionAQL.id)).where(filtro_aql, InspeccionAQL.resultado == "aceptado")
     ).scalar() or 0
     tasa_aceptacion = (aceptadas / total_inspecciones * 100) if total_inspecciones else None
 
+    # proveedores_en_reforzado: estado ACTUAL (no tiene sentido filtrarlo por fecha)
     proveedores_reforzado = db.execute(
         select(func.count(Proveedor.id)).where(Proveedor.nivel_inspeccion_actual == "reforzado")
     ).scalar() or 0
 
-    total_liquidado = db.execute(select(func.sum(Liquidacion.valor_calculado))).scalar()
-    total_pendiente = db.execute(select(func.sum(Pago.monto)).where(Pago.estado == "pendiente_cobro")).scalar()
+    total_liquidado = db.execute(select(func.sum(Liquidacion.valor_calculado)).where(filtro_liquidacion)).scalar()
+    total_pendiente = db.execute(
+        select(func.sum(Pago.monto)).where(filtro_pago, Pago.estado == "pendiente_cobro")
+    ).scalar()
 
     return DashboardOut(
         operaciones=OperacionesResumen(

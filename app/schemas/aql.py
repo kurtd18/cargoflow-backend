@@ -6,10 +6,7 @@ from pydantic import BaseModel, model_validator
 
 from app.services.aql import AQL_VALORES_VALIDOS, NIVELES_INSPECCION_GENERAL
 
-ITEMS_CHECKLIST = (
-    "estado_fisico", "cantidades", "empaque", "etiquetado",
-    "fechas_vencimiento", "condiciones_temperatura", "lote_trazabilidad",
-)
+ITEMS_CHECKLIST = ("estado_fisico", "cantidades", "fechas_vencimiento")
 SEVERIDADES_DEFECTO = {"critico", "mayor", "menor"}
 
 
